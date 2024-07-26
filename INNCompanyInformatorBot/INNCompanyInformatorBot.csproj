@@ -9,6 +9,15 @@
 
   <ItemGroup>
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
+    <PackageReference Include="Telegram.Bot" Version="19.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EditorConfigFiles Remove="C:\Users\evtyk\source\repos\INNCompanyInformatorBot\INNCompanyInformatorBot\.editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="C:\Users\evtyk\source\repos\INNCompanyInformatorBot\INNCompanyInformatorBot\.editorconfig" />
   </ItemGroup>
 
 </Project>
