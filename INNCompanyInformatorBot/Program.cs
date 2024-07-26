@@ -8,26 +8,30 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.ReplyMarkups;
 using Telegram.Bot.Exceptions;
 
+using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Support.UI;
+using OpenQA.Selenium;
+
 namespace INNCompanyInformatorBot
 {
     public class Program
     {
         private static readonly NameValueCollection AppSettings = ConfigurationManager.AppSettings;
-        private static ITelegramBotClient? _botClient; // клиент для работы с TGBot API
+        private static ITelegramBotClient? TGBotClient; // клиент для работы с TGBot API
 
-        private static ReceiverOptions? _receiverOptions; // объект с настройками работы бота
+        private static ReceiverOptions? ReceiverOptions; // объект с настройками работы бота
 
         static async Task Main()
         {
             string? TGBotAPIToken = null;
 
-            foreach (string? Key in AppSettings.AllKeys)
+            foreach (string? Key in AppSettings.AllKeys.Where(key => (key ?? string.Empty).StartsWith("TGBotAPIFragmentKey")))
             {
                 TGBotAPIToken += AppSettings[Key];
             }
 
-            _botClient = new TelegramBotClient(TGBotAPIToken ?? string.Empty);
-            _receiverOptions = new()
+            TGBotClient = new TelegramBotClient(TGBotAPIToken ?? string.Empty);
+            ReceiverOptions = new()
             {
                 AllowedUpdates =
                 [
@@ -37,11 +41,11 @@ namespace INNCompanyInformatorBot
                 ThrowPendingUpdates = true, // обработка сообщений за время оффлайн бота (false — обрабатывать)
             };
 
-            using CancellationTokenSource CancellationTikenSource = new();
+            using CancellationTokenSource CancellationTokenSource = new();
 
-            _botClient.StartReceiving(UpdateHandler, ErrorHandler, _receiverOptions, CancellationTikenSource.Token); // запуск бота
+            TGBotClient.StartReceiving(UpdateHandler, ErrorHandler, ReceiverOptions, CancellationTokenSource.Token); // запуск бота
 
-            User UserBot = await _botClient.GetMeAsync(); // переменная информации о боте
+            User UserBot = await TGBotClient.GetMeAsync(); // переменная информации о боте
             Console.WriteLine($"{UserBot.FirstName} запущен!");
 
             await Task.Delay(-1); // бесконечная задержка для постоянной работы бота
@@ -50,40 +54,84 @@ namespace INNCompanyInformatorBot
         /// <summary>
         /// Задача обработки входящих сообщений
         /// </summary>
-        /// <param name="botClient"></param>
-        /// <param name="update"></param>
-        /// <param name="cancellationToken"></param>
+        /// <param name="TGBotClient"></param>
+        /// <param name="Update"></param>
+        /// <param name="CancellationToken"></param>
         /// <returns></returns>
-        private static async Task UpdateHandler(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        private static async Task UpdateHandler(ITelegramBotClient TGBotClient, Update Update, CancellationToken CancellationToken)
         {
             try
             {
-                switch (update.Type)
+                switch (Update.Type)
                 {
                     case UpdateType.Message:
 
-                        Message? message = update.Message;
-                        User? user = message?.From; // From - от кого пришло сообщение (или любой другой Update)
+                        Message? Message = Update.Message;
+                        User? User = Message?.From; // From - от кого пришло сообщение (или любой другой Update)
 
-                        Console.WriteLine($"{user?.FirstName} ({user?.Id}) написал сообщение: {message?.Text}");
+                        Console.WriteLine($"{User?.FirstName} ({User?.Id}) написал сообщение: {Message?.Text}");
 
-                        Chat? chat = message?.Chat; // вся информация о чате
+                        Chat? Chat = Message?.Chat; // вся информация о чате
 
-                        switch (message?.Type) // обработка типов сообщений
+                        switch (Message?.Type) // обработка типов сообщений
                         {
                             case MessageType.Text: // текстовый тип
 
-                                if (message.Text == "/start") // обработка команды /start
+                                // Обработка команд //
+
+                                if (Message.Text == "/start")
                                 {
-                                    await botClient.SendTextMessageAsync(chat?.Id ?? new(), "Выбери клавиатуру:\n" + "/inline\n" + "/reply\n");
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Выбери клавиатуру:\n" + "/inline\n" + "/reply\n");
                                     
                                     return;
                                 }
 
-                                if (message.Text == "/inline")
+                                else if (Message.Text == "/help")
                                 {
-                                    // Тут создаем нашу клавиатуру
-                                    InlineKeyboardMarkup inlineKeyboard = new
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "[Пока без помощи))]Выбери клавиатуру:\n" + "/inline\n" + "/reply\n");
+
+                                    return;
+                                }
+
+                                else if (Message.Text == "/hello")
+                                {
+                                    string? CreatorInfo = null;
+
+                                    foreach (string? Key in AppSettings.AllKeys.Where(key => !(key ?? string.Empty).StartsWith("TGBotAPIFragmentKey")))
+                                    {
+                                        if (Key == "Name")
+                                        {
+                                            CreatorInfo += AppSettings[Key] + " ";
+                                        }
+
+                                        else if (Key == "GitHubRepositoryLink")
+                                        {
+                                            CreatorInfo += AppSettings[Key];
+                                        }
+
+                                        else
+                                        {
+                                            CreatorInfo += AppSettings[Key] + "\n";
+                                        }
+                                    }
+
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"{CreatorInfo}");
+
+                                    return;
+                                }
+
+                                else if (Message.Text == "/inn")
+                                {
+                                    await ParseCompanyByINN("7719286104");
+                                    //await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "[Пока без помощи))]Выбери клавиатуру:\n" + "/inline\n" + "/reply\n");
+
+                                    return;
+                                }
+
+                                else if (Message.Text == "/inline")
+                                {
+                                    // Тут создаём нашу клавиатуру
+                                    InlineKeyboardMarkup InlineKeyboard = new
                                         (new List<InlineKeyboardButton[]>()
                                         {
                                                 new InlineKeyboardButton[]
@@ -98,14 +146,14 @@ namespace INNCompanyInformatorBot
                                                 },
                                         });
 
-                                    await botClient.SendTextMessageAsync(chat?.Id ?? new(), "Это inline клавиатура!", replyMarkup: inlineKeyboard); // передача всех клавиатур через параметр replyMarkup
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Это inline клавиатура!", replyMarkup: InlineKeyboard); // передача всех клавиатур через параметр replyMarkup
 
                                     return;
                                 }
 
-                                if (message.Text == "/reply")
+                                else if (Message.Text == "/reply")
                                 {
-                                    ReplyKeyboardMarkup replyKeyboard = new
+                                    ReplyKeyboardMarkup ReplyKeyboard = new
                                         (new List<KeyboardButton[]>()
                                         {
                                                 new KeyboardButton[]
@@ -126,21 +174,21 @@ namespace INNCompanyInformatorBot
                                         //ResizeKeyboard = true,
                                     };
 
-                                    await botClient.SendTextMessageAsync(chat?.Id ?? new(), "Это reply клавиатура!", replyMarkup: replyKeyboard);
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Это reply клавиатура!", replyMarkup: ReplyKeyboard);
 
                                     return;
                                 }
 
-                                if (message.Text == "Позвони мне!")
+                                else if (Message.Text == "Позвони мне!")
                                 {
-                                    await botClient.SendTextMessageAsync(chat?.Id ?? new(), "Хорошо, присылай номер!", replyToMessageId: message.MessageId);
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Хорошо, присылай номер!", replyToMessageId: Message.MessageId);
                                     
                                     return;
                                 }
 
-                                if (message.Text == "Напиши моему соседу!")
+                                else if (Message.Text == "Напиши моему соседу!")
                                 {
-                                    await botClient.SendTextMessageAsync(chat?.Id ?? new(), "А самому что, трудно что-ли ?", replyToMessageId: message.MessageId);
+                                    await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "А самому что, трудно что-ли ?", replyToMessageId: Message.MessageId);
                                     
                                     return;
                                 }
@@ -149,7 +197,7 @@ namespace INNCompanyInformatorBot
 
                             default:
 
-                                await botClient.SendTextMessageAsync(chat?.Id ?? new(), "Используй только текст!");
+                                await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Используй только текст!");
                                 
                                 return;
                         }
@@ -158,33 +206,33 @@ namespace INNCompanyInformatorBot
 
                     case UpdateType.CallbackQuery:
 
-                        CallbackQuery? callbackQuery = update.CallbackQuery; // переменная информации нажатой кнопки
-                        User? user1 = callbackQuery?.From;
+                        CallbackQuery? CallbackQuery = Update.CallbackQuery; // переменная информации нажатой кнопки
+                        User? User1 = CallbackQuery?.From;
 
-                        Console.WriteLine($"{user1?.FirstName} ({user1?.Id}) нажал на кнопку: {callbackQuery?.Data}");
+                        Console.WriteLine($"{User1?.FirstName} ({User1?.Id}) нажал на кнопку: {CallbackQuery?.Data}");
                         
-                        Chat? chat1 = callbackQuery?.Message?.Chat;
+                        Chat? Chat1 = CallbackQuery?.Message?.Chat;
 
-                        switch (callbackQuery?.Data)
+                        switch (CallbackQuery?.Data)
                         {
                             case "button1":
 
-                                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id);
-                                await botClient.SendTextMessageAsync(chat1?.Id ?? new(), $"Вы нажали на {callbackQuery.Data}");
+                                await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id);
+                                await TGBotClient.SendTextMessageAsync(Chat1?.Id ?? new(), $"Вы нажали на {CallbackQuery.Data}");
                                 
                                 return;
 
                             case "button2":
 
-                                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "Тут может быть ваш текст!");
-                                await botClient.SendTextMessageAsync(chat1?.Id ?? new(), $"Вы нажали на {callbackQuery.Data}");
+                                await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id, "Тут может быть ваш текст!");
+                                await TGBotClient.SendTextMessageAsync(Chat1?.Id ?? new(), $"Вы нажали на {CallbackQuery.Data}");
 
                                 return;
 
                             case "button3":
 
-                                await botClient.AnswerCallbackQueryAsync(callbackQuery.Id, "А это полноэкранный текст!", showAlert: true);
-                                await botClient.SendTextMessageAsync(chat1?.Id ?? new(), $"Вы нажали на {callbackQuery.Data}");
+                                await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id, "А это полноэкранный текст!", showAlert: true);
+                                await TGBotClient.SendTextMessageAsync(Chat1?.Id ?? new(), $"Вы нажали на {CallbackQuery.Data}");
                                 
                                 return;
                         }
@@ -199,28 +247,58 @@ namespace INNCompanyInformatorBot
             }
         }
 
+        private static async Task ParseCompanyByINN(string companyINN)
+        {
+            ChromeOptions ChromeOptions = new();
+            ChromeOptions.AddArgument("--headless"); // скрытый запуск браузера
+
+            ChromeDriverService ChromeDriverService = ChromeDriverService.CreateDefaultService();
+            ChromeDriverService.HideCommandPromptWindow = true; // скрытие вывода информации о запуске браузера в командной строке
+
+            using ChromeDriver ChromeDriver = new(ChromeDriverService, ChromeOptions);
+            ChromeDriver.Navigate().GoToUrl($"https://www.rusprofile.ru/search?query={companyINN}&search_inactive=0");
+
+            WebDriverWait WebDriverWait = new(ChromeDriver, TimeSpan.FromSeconds(10));
+            WebDriverWait.Until(WebDriver => WebDriver.FindElement(By.XPath("//*[@id='ab-test-wrp']/div[1]/div[1]")));
+
+            IWebElement ShortCompanyNameElement = ChromeDriver.FindElement(By.CssSelector("h1[itemprop='name']"));
+            string ShortCompanyName = ShortCompanyNameElement.Text;
+
+            IWebElement FullCompanyNameElement = ChromeDriver.FindElement(By.ClassName("company-header__full-name"));
+            string FullCompanyName = FullCompanyNameElement.Text;
+
+            IWebElement CompanyAddressElement = ChromeDriver.FindElement(By.Id("clip_address"));
+            string CompanyAddress = CompanyAddressElement.Text;
+
+            Console.WriteLine($"Краткое название компании: {ShortCompanyName}");
+            Console.WriteLine($"Полное название компании: {FullCompanyName}");
+            Console.WriteLine($"Адрес компании: {CompanyAddress}");
+
+            ChromeDriver.Quit();
+        }
+
         /// <summary>
         /// Задача обработки ошибок
         /// </summary>
-        /// <param name="botClient"></param>
-        /// <param name="error"></param>
-        /// <param name="cancellationToken"></param>
+        /// <param name="TGBotClient"></param>
+        /// <param name="Error"></param>
+        /// <param name="CancellationToken"></param>
         /// <returns></returns>
-        private static Task ErrorHandler(ITelegramBotClient botClient, Exception error, CancellationToken cancellationToken)
+        private static Task ErrorHandler(ITelegramBotClient TGBotClient, Exception Error, CancellationToken CancellationToken)
         {
             string ErrorMessage;
 
-            switch (error)
+            switch (Error)
             {
-                case ApiRequestException apiRequestException:
+                case ApiRequestException ApiRequestException:
 
-                    ErrorMessage = $"Telegram API Error:\n[{apiRequestException.ErrorCode}]\n{apiRequestException.Message}";
+                    ErrorMessage = $"Telegram API Error:\n[{ApiRequestException.ErrorCode}]\n{ApiRequestException.Message}";
 
                     break;
 
                 default:
 
-                    ErrorMessage = error.ToString();
+                    ErrorMessage = Error.ToString();
 
                     break;
             }
