@@ -182,7 +182,7 @@ namespace INNCompanyInformatorBot
         {
             if (TGBotClient != null && Chat != null)
             {
-                switch (Command)
+                switch (Command?.ToLower())
                 {
                     case "/start":
 
@@ -191,7 +191,8 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/inline":
-                    case "Встроенная клавиатура":
+                    case "встроенная клавиатура":
+                    case "встроенная":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отлично!", replyMarkup: new ReplyKeyboardRemove());
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Строго, но практично 😉\nИтак, что бы вы хотели сделать?", replyMarkup: InlineKeyboardMarkup);
@@ -199,21 +200,26 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/reply":
-                    case "Кнопочная клавиатура":
+                    case "кнопочная клавиатура":
+                    case "кнопочная":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отличный выбор! Скорее, нажимайте на любую из них 😄", replyMarkup: ReplyKeyboardMarkup);
 
                         break;
 
                     case "/help":
-                    case "Помощь":
+                    case "помощь":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, HelpResponse);
 
                         break;
 
                     case "/hello":
-                    case "О моём создателе":
+                    case "о моём создателе":
+                    case "о моем создателе":
+                    case "о создателе":
+                    case "информация":
+                    case "инфо":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, HelloResponse.Response);
 
@@ -225,7 +231,9 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/inn":
-                    case "Поиск организации(-й) по ИНН":
+                    case "поиск организации(-й) по инн":
+                    case "поиск по инн":
+                    case "поиск":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, "Пожалуйста, введите ИНН организации(-й)\n[Через пробел или запятую]:");
                         IsAwaitingInnInput = true;
@@ -233,7 +241,8 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/last":
-                    case "Повтор последней команды":
+                    case "повтор последней команды":
+                    case "повтор":
 
                         if (LastCommand != null && LastCommand != "/last" && LastCommand != "Повтор последней команды")
                         {
