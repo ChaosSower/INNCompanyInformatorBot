@@ -31,6 +31,7 @@ namespace INNCompanyInformatorBot
         private static readonly HelloResponse HelloResponse = new(); // сообщение вывода информации о создателе проекта
 
         private static bool IsAwaitingInnInput = false; // поле состояния ожидания ИНН от пользователя
+        private static string? LastCommand = null; // поле последней команды бота
 
         /// <summary>
         /// Regex, пропускающий только числа с разделителем пробел и/или запятая
@@ -73,8 +74,8 @@ namespace INNCompanyInformatorBot
                 InlineKeyboardMarkup = new
                 (
                     [
-                        [InlineKeyboardButton.WithCallbackData("Помощь", "/help"), InlineKeyboardButton.WithCallbackData("О моём создателе", "/hello")],
-                        [InlineKeyboardButton.WithCallbackData("Поиск организации(-й) по ИНН", "/inn"), InlineKeyboardButton.WithCallbackData("Повтор последней команды", "/last")]
+                        [InlineKeyboardButton.WithCallbackData("Встроенная клавиатура", "/inline"), InlineKeyboardButton.WithCallbackData("Кнопочная клавиатура", "/reply"), InlineKeyboardButton.WithCallbackData("Помощь", "/help")],
+                        [InlineKeyboardButton.WithCallbackData("О моём создателе", "/hello"), InlineKeyboardButton.WithCallbackData("Поиск организации(-й) по ИНН", "/inn"), InlineKeyboardButton.WithCallbackData("Повтор последней команды", "/last")]
                     ]
                 );
 
@@ -128,7 +129,7 @@ namespace INNCompanyInformatorBot
                     case UpdateType.Message:
 
                         Message = Update.Message;
-                        User = Message?.From; // From - от кого пришло сообщение (или любой другой Update)
+                        User = Message?.From; // From — от кого пришло сообщение (или любой другой Update)
                         Chat = Message?.Chat; // вся информация о чате
 
                         switch (Message?.Type) // обработка типов сообщений
@@ -190,6 +191,7 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/inline":
+                    case "Встроенная клавиатура":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отлично!", replyMarkup: new ReplyKeyboardRemove());
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Строго, но практично 😉\nИтак, что бы вы хотели сделать?", replyMarkup: InlineKeyboardMarkup);
@@ -197,6 +199,7 @@ namespace INNCompanyInformatorBot
                         break;
 
                     case "/reply":
+                    case "Кнопочная клавиатура":
 
                         await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отличный выбор! Скорее, нажимайте на любую из них 😄", replyMarkup: ReplyKeyboardMarkup);
 
@@ -224,13 +227,23 @@ namespace INNCompanyInformatorBot
                     case "/inn":
                     case "Поиск организации(-й) по ИНН":
 
-                        await TGBotClient.SendTextMessageAsync(Chat.Id, "Пожалуйста, введите ИНН организации(-й) [Через пробел или запятую]:");
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, "Пожалуйста, введите ИНН организации(-й)\n[Через пробел или запятую]:");
                         IsAwaitingInnInput = true;
 
                         break;
 
                     case "/last":
                     case "Повтор последней команды":
+
+                        if (LastCommand != null && LastCommand != "/last" && LastCommand != "Повтор последней команды")
+                        {
+                            ExecuteCommand(LastCommand, Chat);
+                        }
+
+                        else
+                        {
+                            await TGBotClient.SendTextMessageAsync(Chat.Id, "Не помню, чтобы до этого были какие-либо команды! 🤔");
+                        }
 
                         break;
                     
@@ -245,9 +258,11 @@ namespace INNCompanyInformatorBot
                                 if (DigitRegex.IsMatch(Command))
                                 {
                                     await TGBotClient.SendTextMessageAsync(Chat.Id, $"Сейчас поищу 😉\nПожалуйсита, ожидайте");
+
                                     string[] CompaniesINN = Command.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
                                     HashSet<string> UniqueCompaniesINNs = new(CompaniesINN);
                                     await ParseCompanyByINN(Chat, UniqueCompaniesINNs);
+
                                     await TGBotClient.SendTextMessageAsync(Chat.Id, $"Помочь ли чем-нибудь ещё? 😃");
                                     IsAwaitingInnInput = false;
                                 }
@@ -256,7 +271,7 @@ namespace INNCompanyInformatorBot
                                 {
                                     await TGBotClient.SendTextMessageAsync(Chat.Id, $"Ай-яй-яй, входные данные содержат недопустимые символы 😲\n" +
                                         $"Но я никому не скажу 🤫\n" +
-                                        $"Пожалуйста, введите корректные ИНН организации(-й) [Через пробел или запятую]:");
+                                        $"Пожалуйста, введите корректные ИНН организации(-й)\n[Через пробел или запятую]:");
 
                                     Console.WriteLine("Входные данные пользователя содержали недопустимые символы.");
                                 }
@@ -269,8 +284,10 @@ namespace INNCompanyInformatorBot
                             await TGBotClient.SendTextMessageAsync(Chat.Id, HelpResponse);
                         }
 
-                        break;
+                        return;
                 }
+
+                LastCommand = Command;
             }
         }
 
@@ -278,7 +295,7 @@ namespace INNCompanyInformatorBot
         /// Асинхронная задача парсинга сайта для получения информации по ИНН
         /// </summary>
         /// <param name="Chat"></param>
-        /// <param name="CompaniesINN"></param>
+        /// <param name="CompaniesINN">Уникальный массив ИНН компаний</param>
         /// <returns></returns>
         private static async Task ParseCompanyByINN(Chat Chat, HashSet<string> CompaniesINN)
         {
