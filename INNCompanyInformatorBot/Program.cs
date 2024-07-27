@@ -99,8 +99,9 @@ namespace INNCompanyInformatorBot
                 });
 
                 Console.WriteLine("Нажмите любую клавишу для остановки бота...");
-                Console.ReadKey();
+                Console.ReadKey(true);
                 Console.WriteLine("Бот был остановлен.");
+                Console.ReadKey();
             }
 
             else
