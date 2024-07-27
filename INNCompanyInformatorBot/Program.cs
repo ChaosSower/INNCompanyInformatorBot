@@ -1,5 +1,6 @@
 ﻿using System.Collections.Specialized;
 using System.Configuration;
+using System.Text.RegularExpressions;
 
 using Telegram.Bot;
 using Telegram.Bot.Polling;
@@ -12,15 +13,31 @@ using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium;
 
+using INNCompanyInformatorBot.Classes.TGBotResponses;
+
 namespace INNCompanyInformatorBot
 {
-    public class Program
+    public partial class Program
     {
         private static readonly NameValueCollection AppSettings = ConfigurationManager.AppSettings; // поле файла конфигурации
+        
         private static TelegramBotClient? TGBotClient; // клиент для работы с API бота
-
         private static ReceiverOptions? ReceiverOptions; // объект с настройками работы бота
-        private static ReplyKeyboardMarkup? ReplyKeyboardMarkup;
+        private static InlineKeyboardMarkup? InlineKeyboardMarkup; // "линейная" клавиатура
+        private static ReplyKeyboardMarkup? ReplyKeyboardMarkup; // кнопочная клавиатура
+
+        private static readonly string StartResponse = new StartResponse().Response; // приветственное сообщение
+        private static readonly string HelpResponse = new HelpResponse().Response; // сообщение вывода возможных команд
+        private static readonly HelloResponse HelloResponse = new(); // сообщение вывода информации о создателе проекта
+
+        private static bool IsAwaitingInnInput = false; // поле состояния ожидания ИНН от пользователя
+
+        /// <summary>
+        /// Regex, пропускающий только числа с разделителем пробел и/или запятая
+        /// </summary>
+        /// <returns></returns>
+        [GeneratedRegex(@"^[0-9\s,]+$")]
+        private static partial Regex OnlyDigitsRegex();
 
         private static async Task Main()
         {
@@ -36,7 +53,7 @@ namespace INNCompanyInformatorBot
 
             catch
             {
-
+                Console.WriteLine("Возникла ошибка считывания данных с файла App.config!");
             }
 
             if (TGBotAPIToken != null)
@@ -53,6 +70,14 @@ namespace INNCompanyInformatorBot
                     ThrowPendingUpdates = true, // обработка сообщений за время оффлайн бота (false — обрабатывать)
                 };
 
+                InlineKeyboardMarkup = new
+                (
+                    [
+                        [InlineKeyboardButton.WithCallbackData("Помощь", "/help"), InlineKeyboardButton.WithCallbackData("О моём создателе", "/hello")],
+                        [InlineKeyboardButton.WithCallbackData("Поиск организации(-й) по ИНН", "/inn"), InlineKeyboardButton.WithCallbackData("Повтор последней команды", "/last")]
+                    ]
+                );
+
                 ReplyKeyboardMarkup = new
                 (
                     [
@@ -64,14 +89,17 @@ namespace INNCompanyInformatorBot
                     ResizeKeyboard = true
                 };
 
-                using CancellationTokenSource CancellationTokenSource = new();
+                await Task.Run(async () =>
+                {
+                    TGBotClient.StartReceiving(UpdateHandler, ErrorHandler, ReceiverOptions); // запуск бота
 
-                TGBotClient.StartReceiving(UpdateHandler, ErrorHandler, ReceiverOptions, CancellationTokenSource.Token); // запуск бота
+                    User UserBot = await TGBotClient.GetMeAsync(); // переменная информации о боте
+                    Console.WriteLine($"Бот «{UserBot.FirstName}» запущен!");
+                });
 
-                User UserBot = await TGBotClient.GetMeAsync(); // переменная информации о боте
-                Console.WriteLine($"{UserBot.FirstName} запущен!");
-
-                await Task.Delay(-1); // бесконечная задержка для постоянной работы бота
+                Console.WriteLine("Нажмите любую клавишу для остановки бота...");
+                Console.ReadKey();
+                Console.WriteLine("Бот был остановлен.");
             }
 
             else
@@ -115,8 +143,10 @@ namespace INNCompanyInformatorBot
 
                             default:
 
-                                await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Данный бот может принимать только текст! 😡");
+                                await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Данный бот может принимать только текст! 😡", cancellationToken: CancellationToken);
                                 
+                                Console.WriteLine($"{User?.FirstName} ({User?.Id}) отправил неприемлемый тип сообщения");
+
                                 break;
                         }
 
@@ -149,94 +179,43 @@ namespace INNCompanyInformatorBot
         /// <param name="Chat"></param>
         private static async void ExecuteCommand(string? Command, Chat? Chat)
         {
-            if (TGBotClient != null)
+            if (TGBotClient != null && Chat != null)
             {
                 switch (Command)
                 {
                     case "/start":
 
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Приветсвую вас, пользователь!\n" +
-                            $"Я бот «Информатор компании по ИНН», и я помогу вам найти информацию о названии и адресе компании по её ИНН.\n\n" +
-                            $"Для начала, выберите тип клавиатуры:\n" +
-                            $"/inline — встроенная\n" +
-                            $"/reply — кнопки");
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, StartResponse);
 
                         break;
 
                     case "/inline":
 
-                        InlineKeyboardMarkup InlineKeyboardMarkup = new
-                                (new List<InlineKeyboardButton[]>()
-                                {
-                                            new InlineKeyboardButton[]
-                                            {
-                                                InlineKeyboardButton.WithCallbackData("Помощь", "/help"),
-                                                InlineKeyboardButton.WithCallbackData("О моём создателе", "/hello"),
-                                            },
-                                            new InlineKeyboardButton[]
-                                            {
-                                                InlineKeyboardButton.WithCallbackData("Поиск организации(-й) по ИНН", "/inn"),
-                                                InlineKeyboardButton.WithCallbackData("Повтор последней команды", "/last"),
-                                            },
-                                });
-
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Отлично!", replyMarkup: new ReplyKeyboardRemove());
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Строго, но практично 😉\nИтак, чтобы вы хотели сделать?", replyMarkup: InlineKeyboardMarkup);
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отлично!", replyMarkup: new ReplyKeyboardRemove());
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, $"Строго, но практично 😉\nИтак, что бы вы хотели сделать?", replyMarkup: InlineKeyboardMarkup);
 
                         break;
 
                     case "/reply":
 
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Отличный выбор! Скорее, нажимайте на любую из них 😄", replyMarkup: ReplyKeyboardMarkup);
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, $"Отличный выбор! Скорее, нажимайте на любую из них 😄", replyMarkup: ReplyKeyboardMarkup);
 
                         break;
 
                     case "/help":
                     case "Помощь":
 
-                        //await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id);
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Список доступных комманд:\n" +
-                            $"\n/help — вывод справки о доступных командах\n" +
-                            $"\n/hello — вывод информации о создателе бота\n" +
-                            $"\n/inn — вывод информации (наименования и адреса) компании(-й) по ИНН\n" +
-                            $"\n/last — повтор последней команды");
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, HelpResponse);
 
                         break;
 
                     case "/hello":
                     case "О моём создателе":
 
-                        //await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id, "Тут может быть ваш текст!");
-                        string? CreatorInfo = null;
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, HelloResponse.Response);
 
-                        try
+                        if (HelloResponse.IsExceptionOccurred)
                         {
-                            foreach (string? Key in AppSettings.AllKeys.Where(key => !(key ?? string.Empty).StartsWith("TGBotAPIFragmentKey")))
-                            {
-                                if (Key == "Name")
-                                {
-                                    CreatorInfo += AppSettings[Key] + " ";
-                                }
-
-                                else if (Key == "GitHubRepositoryLink")
-                                {
-                                    CreatorInfo += AppSettings[Key];
-                                }
-
-                                else
-                                {
-                                    CreatorInfo += AppSettings[Key] + "\n";
-                                }
-                            }
-
-                            await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"{CreatorInfo}");
-                        }
-
-                        catch
-                        {
-                            await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), $"Похоже, что я ничего не могу вспомнить про него 🤔" +
-                                $"Ничего, мы в процессе исправление проблем с моей памятью 😂");
-
                             Console.WriteLine("Боту не удалось извлечь информацию о создателе! Возможно возникли ошибки или файл App.config, содержащий токены этой информации повреждён!");
                         }
 
@@ -245,16 +224,50 @@ namespace INNCompanyInformatorBot
                     case "/inn":
                     case "Поиск организации(-й) по ИНН":
 
-                        //await TGBotClient.AnswerCallbackQueryAsync(CallbackQuery.Id, "А это полноэкранный текст!", showAlert: true);
-                        await TGBotClient.SendTextMessageAsync(Chat?.Id ?? new(), "Пожалуйста, введите ИНН организации(-й):");
-                        string? userInput = null;
-                        string[] innNumbers = userInput.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                        await ParseCompanyByINN(["7719286104", "7720675962"]);
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, "Пожалуйста, введите ИНН организации(-й) [Через пробел или запятую]:");
+                        IsAwaitingInnInput = true;
 
                         break;
 
                     case "/last":
                     case "Повтор последней команды":
+
+                        break;
+                    
+                    default:
+
+                        if (IsAwaitingInnInput)
+                        {
+                            if (Command != null)
+                            {
+                                Regex DigitRegex = OnlyDigitsRegex();
+
+                                if (DigitRegex.IsMatch(Command))
+                                {
+                                    await TGBotClient.SendTextMessageAsync(Chat.Id, $"Сейчас поищу 😉\nПожалуйсита, ожидайте");
+                                    string[] CompaniesINN = Command.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                                    HashSet<string> UniqueCompaniesINNs = new(CompaniesINN);
+                                    await ParseCompanyByINN(Chat, UniqueCompaniesINNs);
+                                    await TGBotClient.SendTextMessageAsync(Chat.Id, $"Помочь ли чем-нибудь ещё? 😃");
+                                    IsAwaitingInnInput = false;
+                                }
+
+                                else
+                                {
+                                    await TGBotClient.SendTextMessageAsync(Chat.Id, $"Ай-яй-яй, входные данные содержат недопустимые символы 😲\n" +
+                                        $"Но я никому не скажу 🤫\n" +
+                                        $"Пожалуйста, введите корректные ИНН организации(-й) [Через пробел или запятую]:");
+
+                                    Console.WriteLine("Входные данные пользователя содержали недопустимые символы.");
+                                }
+                            }
+                        }
+
+                        else
+                        {
+                            await TGBotClient.SendTextMessageAsync(Chat.Id, $"Я вас не совсем понимаю 🤨\nПожалуйсита, используйте команды, доступные для моего понимания!");
+                            await TGBotClient.SendTextMessageAsync(Chat.Id, HelpResponse);
+                        }
 
                         break;
                 }
@@ -264,25 +277,26 @@ namespace INNCompanyInformatorBot
         /// <summary>
         /// Асинхронная задача парсинга сайта для получения информации по ИНН
         /// </summary>
+        /// <param name="Chat"></param>
         /// <param name="CompaniesINN"></param>
         /// <returns></returns>
-        private static async Task ParseCompanyByINN(string[] CompaniesINN)
+        private static async Task ParseCompanyByINN(Chat Chat, HashSet<string> CompaniesINN)
         {
-            try
+            ChromeOptions ChromeOptions = new();
+            ChromeOptions.AddArgument("--headless"); // скрытый запуск браузера
+
+            ChromeDriverService ChromeDriverService = ChromeDriverService.CreateDefaultService();
+            ChromeDriverService.HideCommandPromptWindow = true; // скрытие вывода информации о запуске браузера в командной строке
+
+            using ChromeDriver ChromeDriver = new(ChromeDriverService, ChromeOptions);
+            WebDriverWait WebDriverWait = new(ChromeDriver, TimeSpan.FromSeconds(10));
+
+            foreach (string CompanyINN in CompaniesINN)
             {
-                ChromeOptions ChromeOptions = new();
-                ChromeOptions.AddArgument("--headless"); // скрытый запуск браузера
-
-                ChromeDriverService ChromeDriverService = ChromeDriverService.CreateDefaultService();
-                ChromeDriverService.HideCommandPromptWindow = true; // скрытие вывода информации о запуске браузера в командной строке
-
-                using ChromeDriver ChromeDriver = new(ChromeDriverService, ChromeOptions);
-
-                foreach (string CompanyINN in CompaniesINN)
+                try
                 {
                     ChromeDriver.Navigate().GoToUrl($"https://www.rusprofile.ru/search?query={CompanyINN}&search_inactive=0");
 
-                    WebDriverWait WebDriverWait = new(ChromeDriver, TimeSpan.FromSeconds(10));
                     WebDriverWait.Until(WebDriver => WebDriver.FindElement(By.XPath("//*[@id='ab-test-wrp']/div[1]/div[1]")));
 
                     IWebElement ShortCompanyNameElement = ChromeDriver.FindElement(By.CssSelector("h1[itemprop='name']"));
@@ -294,17 +308,29 @@ namespace INNCompanyInformatorBot
                     IWebElement CompanyAddressElement = ChromeDriver.FindElement(By.Id("clip_address"));
                     string CompanyAddress = CompanyAddressElement.Text;
 
-                    Console.WriteLine($"ИНН: {CompanyINN}");
-                    Console.WriteLine($"Краткое название компании: {ShortCompanyName}");
-                    Console.WriteLine($"Полное название компании: {FullCompanyName}");
-                    Console.WriteLine($"Адрес компании: {CompanyAddress}");
-                    Console.WriteLine();
+                    if (TGBotClient != null)
+                    {
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, $"ИНН: {CompanyINN}\n" +
+                            $"Краткое название компании: {ShortCompanyName}\n" +
+                            $"Полное название компании: {FullCompanyName}\n" +
+                            $"Адрес компании: {CompanyAddress}");
+                    }
                 }
-            }
 
-            catch (Exception Exception)
-            {
-                Console.WriteLine($"Возникло исключение: {Exception.Message}");
+                catch (Exception Exception)
+                {
+                    Console.WriteLine($"\nВозникло исключение при обработке компании с ИНН {CompanyINN}: {Exception.Message}");
+                    
+                    if (TGBotClient != null)
+                    {
+                        await TGBotClient.SendTextMessageAsync(Chat.Id, $"Я не смог найти организацию с таким ИНН: {CompanyINN} 😳");
+                    }
+
+                    if (CompanyINN != CompaniesINN.Last())
+                    {
+                        Console.WriteLine();
+                    }
+                }
             }
         }
 
